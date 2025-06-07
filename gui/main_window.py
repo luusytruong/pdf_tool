@@ -341,11 +341,12 @@ class MainWindow(QMainWindow):
         self.save_btn.setEnabled(enabled)
         self.save_as_btn.setEnabled(enabled)
         self.drop_area.setAcceptDrops(enabled)
-        # Đã loại bỏ select_folder_btn nên không cần setEnabled cho nó nữa
-        # Nếu muốn chặn kéo thả thực sự, cần override dragEnterEvent và dropEvent
-        # để kiểm tra trạng thái này
-        # Đảm bảo dừng luồng trước khi hủy
-        # Ensure merge_thread is initialized before checking its state
-        if hasattr(self, 'merge_thread') and self.merge_thread.isRunning():
-            self.merge_thread.quit()
-            self.merge_thread.wait()
+        # Đảm bảo không truy cập merge_thread đã bị xóa
+        if hasattr(self, 'merge_thread'):
+            try:
+                if self.merge_thread.isRunning():
+                    self.merge_thread.quit()
+                    self.merge_thread.wait()
+            except RuntimeError:
+                # Nếu merge_thread đã bị xóa bởi Qt, bỏ qua lỗi này
+                pass
