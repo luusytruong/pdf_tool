@@ -1,6 +1,6 @@
 from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                                QPushButton, QLabel, QProgressBar, QFileDialog,
-                               QTabWidget, QScrollArea, QGridLayout, QMessageBox)
+                               QScrollArea, QGridLayout, QMessageBox)
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtGui import QPixmap, QDragEnterEvent, QDropEvent
 import os
@@ -32,6 +32,25 @@ class PDFWorker(QThread):
             self.error.emit(str(e))
 
 
+class MergeAndAnalyzeThread(QThread):
+    progress_updated = Signal(int)
+    finished = Signal(str)
+    error = Signal(str)
+
+    def __init__(self, processor, folder_path):
+        super().__init__()
+        self.processor = processor
+        self.folder_path = folder_path
+
+    def run(self):
+        try:
+            merged_pdf = self.processor.merge_single_folder(
+                self.folder_path, progress_callback=self.progress_updated.emit)
+            self.finished.emit(merged_pdf)
+        except Exception as e:
+            self.error.emit(str(e))
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -47,75 +66,42 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central_widget)
         layout = QVBoxLayout(central_widget)
 
-        # Tab widget
-        tabs = QTabWidget()
-        layout.addWidget(tabs)
-
-        # Tab 1: Remove Blank Pages
-        remove_blank_tab = QWidget()
-        remove_blank_layout = QVBoxLayout(remove_blank_tab)
-
-        # Drop area
-        self.drop_area = QLabel(
-            "Kéo thả file PDF vào đây\nhoặc nhấn nút Chọn File")
+        self.drop_area = QLabel("Kéo thả file PDF hoặc thư mục vào đây\nhoặc nhấn nút Chọn File/Thư mục")
         self.drop_area.setAlignment(Qt.AlignCenter)
         self.drop_area.setStyleSheet("""
             QLabel {
-                border: 1px solid #ccc;
+                border: 2px dashed #888;
                 border-radius: 5px;
                 padding: 20px;
                 background: #fff;
+                color: #000;
             }
         """)
         self.drop_area.setMinimumHeight(150)
-        remove_blank_layout.addWidget(self.drop_area)
+        layout.addWidget(self.drop_area)
 
-        # Buttons
         button_layout = QHBoxLayout()
         self.select_file_btn = QPushButton("Chọn File")
+        self.select_folder_btn = QPushButton("Chọn Thư mục")
         self.save_btn = QPushButton("Lưu")
         self.save_as_btn = QPushButton("Lưu thành file mới")
-
         self.save_btn.setEnabled(False)
         self.save_as_btn.setEnabled(False)
-
         button_layout.addWidget(self.select_file_btn)
+        button_layout.addWidget(self.select_folder_btn)
         button_layout.addWidget(self.save_btn)
         button_layout.addWidget(self.save_as_btn)
-        remove_blank_layout.addLayout(button_layout)
+        layout.addLayout(button_layout)
 
-        # Progress bar
         self.progress_bar = QProgressBar()
-        remove_blank_layout.addWidget(self.progress_bar)
+        layout.addWidget(self.progress_bar)
 
-        # Thumbnails area
         self.thumbnails_area = QScrollArea()
         self.thumbnails_widget = QWidget()
         self.thumbnails_layout = QGridLayout(self.thumbnails_widget)
         self.thumbnails_area.setWidget(self.thumbnails_widget)
         self.thumbnails_area.setWidgetResizable(True)
-        remove_blank_layout.addWidget(self.thumbnails_area)
-
-        tabs.addTab(remove_blank_tab, "Xóa trang trắng")
-
-        # Tab 2: Merge PDFs
-        merge_tab = QWidget()
-        merge_layout = QVBoxLayout(merge_tab)
-
-        self.select_folder_btn = QPushButton("Chọn thư mục")
-        merge_layout.addWidget(self.select_folder_btn)
-
-        self.merge_progress_bar = QProgressBar()
-        self.merge_progress_bar.setVisible(True)
-        self.merge_progress_bar.setValue(0)
-        self.merge_progress_bar.setFormat("%p%")
-        merge_layout.addWidget(self.merge_progress_bar)
-
-        tabs.addTab(merge_tab, "Gộp PDF")
-
-        # Clear merge tab UI
-        self.select_folder_btn.setVisible(False)
-        self.merge_progress_bar.setVisible(False)
+        layout.addWidget(self.thumbnails_area)
 
     def setup_connections(self):
         self.select_file_btn.clicked.connect(self.select_file)
@@ -137,15 +123,62 @@ class MainWindow(QMainWindow):
         if not self.select_file_btn.isEnabled():
             event.ignore()
             return
-        files = [url.toLocalFile() for url in event.mimeData().urls()]
-        if files and files[0].lower().endswith('.pdf'):
-            self.load_pdf(files[0])
+        urls = event.mimeData().urls()
+        if not urls:
+            return
+        path = urls[0].toLocalFile()
+        print(f"[DEBUG] Đường dẫn kéo thả: {path}")  # Log ra console
+        import os
+        import re
+        # Loại bỏ dấu / ở cuối nếu có (do kéo thả thư mục trên macOS)
+        if path.endswith(os.sep):
+            path = path.rstrip(os.sep)
+        if os.path.isfile(path) and path.lower().endswith('.pdf'):
+            self.load_pdf(path)
+        elif os.path.isdir(path):
+            folder_name = os.path.basename(path)
+            if folder_name.startswith('A55-91-001-') and re.search(r'A55-91-001-\d{2}-\d{4}', folder_name):
+                self.progress_bar.setValue(0)
+                self.progress_bar.setVisible(True)
+                self.set_interaction_enabled(False)
+                self.merge_thread = MergeAndAnalyzeThread(self.processor, path)
+                self.merge_thread.progress_updated.connect(self.progress_bar.setValue)
+                self.merge_thread.finished.connect(self.on_merge_and_analyze_finished)
+                self.merge_thread.error.connect(self.on_processing_error)
+                self.merge_thread.start()
+            else:
+                QMessageBox.warning(self, "Cảnh báo", "Chỉ hỗ trợ kéo thả thư mục đúng định dạng A55-91-001-xx-xxxx.")
+        else:
+            QMessageBox.warning(self, "Cảnh báo", "Chỉ hỗ trợ kéo thả file PDF hoặc thư mục đúng định dạng.")
 
     def select_file(self):
-        filepath, _ = QFileDialog.getOpenFileName(
-            self, "Chọn file PDF", "", "PDF Files (*.pdf)")
-        if filepath:
-            self.load_pdf(filepath)
+        from PySide6.QtWidgets import QFileDialog
+        import os
+        file_path, _ = QFileDialog.getOpenFileName(self, "Chọn file PDF", "", "PDF Files (*.pdf)")
+        if file_path:
+            self.load_pdf(file_path)
+
+    def select_folder(self):
+        from PySide6.QtWidgets import QFileDialog
+        import os
+        import re
+        folder = QFileDialog.getExistingDirectory(self, "Chọn thư mục chứa các file PDF")
+        if folder:
+            folder_name = os.path.basename(folder)
+            if re.match(r'^A55-91-001-\d{2}-\d{4}$', folder_name):
+                try:
+                    self.progress_bar.setValue(0)
+                    self.progress_bar.setVisible(True)
+                    self.set_interaction_enabled(False)
+                    self.merge_thread = MergeAndAnalyzeThread(self.processor, folder)
+                    self.merge_thread.progress_updated.connect(self.progress_bar.setValue)
+                    self.merge_thread.finished.connect(self.on_merge_and_analyze_finished)
+                    self.merge_thread.error.connect(self.on_processing_error)
+                    self.merge_thread.start()
+                except Exception as e:
+                    QMessageBox.critical(self, "Lỗi", f"Gộp file thất bại: {str(e)}")
+            else:
+                QMessageBox.warning(self, "Cảnh báo", "Chỉ hỗ trợ chọn thư mục đúng định dạng A55-91-001-xx-xxxx.")
 
     def load_pdf(self, filepath):
         self.current_file = filepath
@@ -260,10 +293,11 @@ class MainWindow(QMainWindow):
             # Thêm style cho container
             container.setStyleSheet("""
                 background: #fff;
-                border: 1px solid #ccc;
+                border: 1px solid #eee;
                 border-radius: 8px;
                 padding: 0;
                 margin: 0;
+                color: #000;
             """)
             self.thumbnails_layout.addWidget(
                 container, idx // columns, idx % columns)
@@ -296,12 +330,18 @@ class MainWindow(QMainWindow):
         QMessageBox.information(self, "Gộp hoàn tất",
                                 f"Đã gộp file và lưu tại:\n{output}")
 
+    def on_merge_and_analyze_finished(self, merged_pdf):
+        self.set_interaction_enabled(True)
+        self.progress_bar.setValue(100)
+        QMessageBox.information(self, "Gộp PDF hoàn tất", f"Đã gộp file PDF: {merged_pdf}")
+        self.load_pdf(merged_pdf)
+
     def set_interaction_enabled(self, enabled):
         self.select_file_btn.setEnabled(enabled)
         self.save_btn.setEnabled(enabled)
         self.save_as_btn.setEnabled(enabled)
-        self.select_folder_btn.setEnabled(enabled)
         self.drop_area.setAcceptDrops(enabled)
+        # Đã loại bỏ select_folder_btn nên không cần setEnabled cho nó nữa
         # Nếu muốn chặn kéo thả thực sự, cần override dragEnterEvent và dropEvent
         # để kiểm tra trạng thái này
         # Đảm bảo dừng luồng trước khi hủy

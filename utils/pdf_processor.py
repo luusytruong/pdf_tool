@@ -290,43 +290,58 @@ class PDFProcessor(QObject):
         return new_path if save_as_new else filepath
 
     def merge_pdfs(self, folder_path):
+        import os
+        import re
         from pathlib import Path
         import fitz
-
         folder_path = Path(folder_path)
-        if not folder_path.exists() or not folder_path.is_dir():
-            raise ValueError(f"Thư mục không tồn tại: {folder_path}")
-
-        subfolders = [f for f in folder_path.iterdir() if f.is_dir() and f.name.startswith("A55-91-001-02-")]
-
+        # Nếu chính folder_path là thư mục con đúng định dạng thì xử lý luôn
+        folder_name = str(folder_path).split(os.sep)[-1]
+        if folder_name.startswith('A55-91-001-') and re.search(r'A55-91-001-\d{2}-\d{4}', folder_name):
+            return self.merge_single_folder(str(folder_path))
+        # Nếu không, tìm các thư mục con đúng định dạng
+        subfolders = [f for f in folder_path.iterdir() if f.is_dir() and f.name.startswith('A55-91-001-') and re.search(r'A55-91-001-\d{2}-\d{4}', f.name)]
         if not subfolders:
             raise ValueError(f"Không tìm thấy thư mục con phù hợp trong {folder_path}")
+        results = []
+        for subfolder in subfolders:
+            results.append(self.merge_single_folder(str(subfolder)))
+        return results
 
-        total_subfolders = len(subfolders)
-        for idx, subfolder in enumerate(subfolders):
-            pdf_files = [f for f in subfolder.glob("*.pdf")]
-
-            if not pdf_files:
-                continue
-
-            output_path = subfolder / f"{subfolder.name}.pdf"
-
-            if output_path.exists():
-                output_path.unlink()
-
-            merged_doc = fitz.open()
-            for pdf_idx, pdf_file in enumerate(pdf_files):
-                try:
-                    doc = fitz.open(str(pdf_file))
-                    merged_doc.insert_pdf(doc)
-                    doc.close()
-                    progress = int(((idx * len(pdf_files) + pdf_idx + 1) / (total_subfolders * len(pdf_files))) * 100)
-                    self.merge_progress.emit(progress)
-                except Exception:
-                    continue
-
-            merged_doc.save(str(output_path))
-            merged_doc.close()
+    def merge_single_folder(self, folder_path, progress_callback=None):
+        import os
+        import fitz
+        from pathlib import Path
+        import re
+        folder = Path(folder_path)
+        folder_name = str(folder).split(os.sep)[-1]
+        # Kiểm tra đúng định dạng tên thư mục
+        if not (folder_name.startswith('A55-91-001-') and re.search(r'A55-91-001-\d{2}-\d{4}', folder_name)):
+            raise ValueError(f"Thư mục không đúng định dạng: {folder_name}")
+        pdf_files = [f for f in folder.glob('*.pdf') if f.stem.isdigit() or (f.stem != folder.name)]
+        pdf_files = [f for f in pdf_files if f.name != f"{folder.name}.pdf"]
+        pdf_files.sort(key=lambda x: x.stem)
+        if not pdf_files:
+            raise Exception("Không tìm thấy file PDF hợp lệ trong thư mục.")
+        output_path = folder / f"{folder.name}.pdf"
+        if output_path.exists():
+            output_path.unlink()
+        merged_doc = fitz.open()
+        total = len(pdf_files)
+        for idx, pdf_file in enumerate(pdf_files):
+            doc = fitz.open(str(pdf_file))
+            merged_doc.insert_pdf(doc)
+            doc.close()
+            if progress_callback:
+                progress_callback(int((idx + 1) / total * 80))  # 0-80% cho gộp
+        merged_doc.save(str(output_path))
+        merged_doc.close()
+        if progress_callback:
+            progress_callback(90)  # 90% khi đã gộp xong
+        self.analyze_pdf(str(output_path))
+        if progress_callback:
+            progress_callback(100)
+        return str(output_path)
 
 class QLabelLogger:
     def __init__(self, label):
