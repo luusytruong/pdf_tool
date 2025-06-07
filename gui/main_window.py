@@ -66,7 +66,8 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central_widget)
         layout = QVBoxLayout(central_widget)
 
-        self.drop_area = QLabel("Kéo thả file PDF hoặc thư mục vào đây\nhoặc nhấn nút Chọn File/Thư mục")
+        self.drop_area = QLabel(
+            "Kéo thả file PDF hoặc thư mục vào đây\nhoặc nhấn nút Chọn File/Thư mục")
         self.drop_area.setAlignment(Qt.AlignCenter)
         self.drop_area.setStyleSheet("""
             QLabel {
@@ -129,56 +130,46 @@ class MainWindow(QMainWindow):
         path = urls[0].toLocalFile()
         print(f"[DEBUG] Đường dẫn kéo thả: {path}")  # Log ra console
         import os
-        import re
-        # Loại bỏ dấu / ở cuối nếu có (do kéo thả thư mục trên macOS)
         if path.endswith(os.sep):
             path = path.rstrip(os.sep)
         if os.path.isfile(path) and path.lower().endswith('.pdf'):
             self.load_pdf(path)
         elif os.path.isdir(path):
-            folder_name = os.path.basename(path)
-            if folder_name.startswith('A55-91-001-') and re.search(r'A55-91-001-\d{2}-\d{4}', folder_name):
-                self.progress_bar.setValue(0)
-                self.progress_bar.setVisible(True)
-                self.set_interaction_enabled(False)
-                self.merge_thread = MergeAndAnalyzeThread(self.processor, path)
-                self.merge_thread.progress_updated.connect(self.progress_bar.setValue)
-                self.merge_thread.finished.connect(self.on_merge_and_analyze_finished)
-                self.merge_thread.error.connect(self.on_processing_error)
-                self.merge_thread.start()
-            else:
-                QMessageBox.warning(self, "Cảnh báo", "Chỉ hỗ trợ kéo thả thư mục đúng định dạng A55-91-001-xx-xxxx.")
+            self.handle_folder_selected(path)
         else:
-            QMessageBox.warning(self, "Cảnh báo", "Chỉ hỗ trợ kéo thả file PDF hoặc thư mục đúng định dạng.")
+            QMessageBox.warning(
+                self, "Cảnh báo", "Chỉ hỗ trợ kéo thả file PDF hoặc thư mục đúng định dạng.")
 
     def select_file(self):
         from PySide6.QtWidgets import QFileDialog
         import os
-        file_path, _ = QFileDialog.getOpenFileName(self, "Chọn file PDF", "", "PDF Files (*.pdf)")
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Chọn file PDF", "", "PDF Files (*.pdf)")
         if file_path:
             self.load_pdf(file_path)
 
     def select_folder(self):
         from PySide6.QtWidgets import QFileDialog
+        folder = QFileDialog.getExistingDirectory(
+            self, "Chọn thư mục chứa các file PDF")
+        if folder:
+            self.handle_folder_selected(folder)
+
+    def handle_folder_selected(self, folder):
         import os
         import re
-        folder = QFileDialog.getExistingDirectory(self, "Chọn thư mục chứa các file PDF")
-        if folder:
-            folder_name = os.path.basename(folder)
-            if re.match(r'^A55-91-001-\d{2}-\d{4}$', folder_name):
-                try:
-                    self.progress_bar.setValue(0)
-                    self.progress_bar.setVisible(True)
-                    self.set_interaction_enabled(False)
-                    self.merge_thread = MergeAndAnalyzeThread(self.processor, folder)
-                    self.merge_thread.progress_updated.connect(self.progress_bar.setValue)
-                    self.merge_thread.finished.connect(self.on_merge_and_analyze_finished)
-                    self.merge_thread.error.connect(self.on_processing_error)
-                    self.merge_thread.start()
-                except Exception as e:
-                    QMessageBox.critical(self, "Lỗi", f"Gộp file thất bại: {str(e)}")
-            else:
-                QMessageBox.warning(self, "Cảnh báo", "Chỉ hỗ trợ chọn thư mục đúng định dạng A55-91-001-xx-xxxx.")
+        folder_name = os.path.basename(folder.rstrip(os.sep))
+        if folder_name.startswith('A55-91-001-') and re.search(r'A55-91-001-\d{2}-\d{4}', folder_name):
+            self.progress_bar.setValue(0)
+            self.progress_bar.setVisible(True)
+            self.set_interaction_enabled(False)
+            self.merge_thread = MergeAndAnalyzeThread(self.processor, folder.rstrip(os.sep))
+            self.merge_thread.progress_updated.connect(self.progress_bar.setValue)
+            self.merge_thread.finished.connect(self.on_merge_and_analyze_finished)
+            self.merge_thread.error.connect(self.on_processing_error)
+            self.merge_thread.start()
+        else:
+            QMessageBox.warning(self, "Cảnh báo", "Chỉ hỗ trợ chọn thư mục đúng định dạng A55-91-001-xx-xxxx.")
 
     def load_pdf(self, filepath):
         self.current_file = filepath
@@ -303,50 +294,63 @@ class MainWindow(QMainWindow):
                 container, idx // columns, idx % columns)
 
     def select_folder(self):
-        folder = QFileDialog.getExistingDirectory(self, "Chọn thư mục để gộp PDF")
-        if not folder:
-            QMessageBox.warning(self, "Cảnh báo", "Vui lòng chọn một thư mục hợp lệ.")
-            return
-        self.processor.input_folder = folder
-        # Tạo thread cho việc gộp file
-        self.merge_thread = QThread()
-        self.processor.moveToThread(self.merge_thread)
-        self.merge_thread.started.connect(self.start_merge)
-        self.merge_thread.finished.connect(self.merge_thread.deleteLater)
-        self.merge_thread.start()
+        from PySide6.QtWidgets import QFileDialog
+        folder = QFileDialog.getExistingDirectory(
+            self, "Chọn thư mục chứa các file PDF")
+        if folder:
+            self.handle_folder_selected(folder)
 
-    def start_merge(self):
-        folder = self.processor.input_folder
-        # Thêm logging thông báo bắt đầu gộp file
-        self.processor.logger.info("Đang bắt đầu gộp file PDF...")
-        output = self.processor.merge_pdfs(folder)
-        if output:
-            self.on_merge_complete(output)
+    def handle_folder_selected(self, folder):
+        import os
+        import re
+        folder_name = os.path.basename(folder.rstrip(os.sep))
+        if folder_name.startswith('A55-91-001-') and re.search(r'A55-91-001-\d{2}-\d{4}', folder_name):
+            self.progress_bar.setValue(0)
+            self.progress_bar.setVisible(True)
+            self.set_interaction_enabled(False)
+            self.merge_thread = MergeAndAnalyzeThread(self.processor, folder.rstrip(os.sep))
+            self.merge_thread.progress_updated.connect(self.progress_bar.setValue)
+            self.merge_thread.finished.connect(self.on_merge_and_analyze_finished)
+            self.merge_thread.error.connect(self.on_processing_error)
+            self.merge_thread.start()
         else:
-            self.on_processing_error("Gộp file thất bại")
+            QMessageBox.warning(self, "Cảnh báo", "Chỉ hỗ trợ chọn thư mục đúng định dạng A55-91-001-xx-xxxx.")
 
-    def on_merge_complete(self, output):
-        self.set_interaction_enabled(True)
-        QMessageBox.information(self, "Gộp hoàn tất",
-                                f"Đã gộp file và lưu tại:\n{output}")
-
-    def on_merge_and_analyze_finished(self, merged_pdf):
-        self.set_interaction_enabled(True)
-        self.progress_bar.setValue(100)
-        QMessageBox.information(self, "Gộp PDF hoàn tất", f"Đã gộp file PDF: {merged_pdf}")
-        self.load_pdf(merged_pdf)
+    def dropEvent(self, event: QDropEvent):
+        if not self.select_file_btn.isEnabled():
+            event.ignore()
+            return
+        urls = event.mimeData().urls()
+        if not urls:
+            return
+        path = urls[0].toLocalFile()
+        print(f"[DEBUG] Đường dẫn kéo thả: {path}")
+        import os
+        if path.endswith(os.sep):
+            path = path.rstrip(os.sep)
+        if os.path.isfile(path) and path.lower().endswith('.pdf'):
+            self.load_pdf(path)
+        elif os.path.isdir(path):
+            self.handle_folder_selected(path)
+        else:
+            QMessageBox.warning(self, "Cảnh báo", "Chỉ hỗ trợ kéo thả file PDF hoặc thư mục đúng định dạng.")
 
     def set_interaction_enabled(self, enabled):
         self.select_file_btn.setEnabled(enabled)
+        self.select_folder_btn.setEnabled(enabled)
         self.save_btn.setEnabled(enabled)
         self.save_as_btn.setEnabled(enabled)
         self.drop_area.setAcceptDrops(enabled)
-        # Đảm bảo không truy cập merge_thread đã bị xóa
         if hasattr(self, 'merge_thread'):
             try:
                 if self.merge_thread.isRunning():
                     self.merge_thread.quit()
                     self.merge_thread.wait()
             except RuntimeError:
-                # Nếu merge_thread đã bị xóa bởi Qt, bỏ qua lỗi này
                 pass
+
+    def on_merge_and_analyze_finished(self, merged_pdf):
+        self.set_interaction_enabled(True)
+        self.progress_bar.setValue(100)
+        QMessageBox.information(self, "Gộp PDF hoàn tất", f"Đã gộp file PDF: {merged_pdf}")
+        self.load_pdf(merged_pdf)
