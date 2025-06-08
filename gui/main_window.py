@@ -153,7 +153,7 @@ class MainWindow(QMainWindow):
         import os
         import re
         folder_name = os.path.basename(folder.rstrip(os.sep))
-        if folder_name.startswith('A55-91-001-') and re.search(r'A55-91-001-\d{2}-\d{4}', folder_name):
+        if folder_name.startswith('A55-91-'):
             self.progress_bar.setValue(0)
             self.progress_bar.setVisible(True)
             self.set_interaction_enabled(False)

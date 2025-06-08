@@ -22,8 +22,8 @@ try:
     logging.info(device_info)
 except Exception as e:
     logging.warning(f"TensorFlow device config error: {e}")
-
-MODEL_PATH = os.path.join(os.path.dirname(__file__), '../model/pdf_classifier.keras')
+    
+MODEL_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "model", "pdf_classifier.keras"))
 pdf_classifier = keras.models.load_model(MODEL_PATH)
 
 class PDFProcessor(QObject):
