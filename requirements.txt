@@ -1,4 +1,26 @@
-PySide6==6.9.1
-PyMuPDF==1.26.0
-Pillow==11.2.1
-numpy==2.2.6
+# requirements.txt for PDF Tool v3
+# Đảm bảo tương thích cả macOS (Apple Silicon) và Windows
+
+# Core dependencies
+pillow
+pymupdf
+pyside6
+numpy
+
+# TensorFlow (chỉ cài 1 trong 2 tuỳ nền tảng)
+tensorflow; platform_system != 'Darwin'
+tensorflow-macos; platform_system == 'Darwin'
+tensorflow-metal; platform_system == 'Darwin'
+
+# Logging (nếu cần)
+# loguru
+
+# Ghi chú:
+# - Trên MacBook M1/M2/M3: nên cài tensorflow-macos và tensorflow-metal để tận dụng GPU.
+# - Trên Windows/Linux: chỉ cần tensorflow.
+# - Nếu gặp lỗi với pymupdf, thử: pip install --upgrade pip setuptools wheel
+# - Nếu dùng logic logging nâng cao, bỏ comment loguru.
+# - fitz là pymupdf (không cần cài fitz riêng).
+# - Đảm bảo pip >= 21.3 để hỗ trợ marker platform_system.
+# - Nếu cài qua requirements.txt bị lỗi, hãy cài thủ công từng dòng phù hợp với hệ điều hành.
+# - Model AI: pdf_classifier.keras để trong thư mục model/

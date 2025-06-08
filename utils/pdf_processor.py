@@ -6,6 +6,25 @@ import numpy as np
 from concurrent.futures import ThreadPoolExecutor
 from PySide6.QtCore import Signal, QObject
 import logging
+import tensorflow as tf
+from tensorflow import keras
+
+# Tối ưu TensorFlow: bật XLA và log thiết bị
+try:
+    tf.config.optimizer.set_jit(True)  # Bật XLA
+    physical_devices = tf.config.list_physical_devices('GPU')
+    if physical_devices:
+        tf.config.experimental.set_memory_growth(physical_devices[0], True)
+        device_info = f"Using GPU: {physical_devices[0].name}"
+    else:
+        device_info = "Using CPU (no GPU found)"
+    print(device_info)
+    logging.info(device_info)
+except Exception as e:
+    logging.warning(f"TensorFlow device config error: {e}")
+
+MODEL_PATH = os.path.join(os.path.dirname(__file__), '../model/pdf_classifier.keras')
+pdf_classifier = keras.models.load_model(MODEL_PATH)
 
 class PDFProcessor(QObject):
     progress_updated = Signal(int)
@@ -161,6 +180,24 @@ class PDFProcessor(QObject):
     def is_blank_page(self, page):
         page_num = page.number + 1
         metrics = {}
+
+        # --- Dùng model AI để phân loại trang rỗng ---
+        try:
+            pix = page.get_pixmap(matrix=fitz.Matrix(256/page.rect.width, 256/page.rect.height))
+            img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+            img = img.convert('L').resize((256, 256))
+            img_arr = np.array(img).astype('float32') / 255.0
+            img_arr = img_arr.reshape((1, 256, 256, 1))
+            pred = pdf_classifier.predict(img_arr, verbose=0)[0][0]
+            # Nếu model dự đoán < 0.5 thì là rỗng, >= 0.5 là có nội dung
+            if pred < 0.5:
+                metrics['ai_blank'] = True
+                self.log_page_analysis(page_num, metrics)
+                return True
+            else:
+                metrics['ai_blank'] = False
+        except Exception as e:
+            self.logger.warning(f"AI model error: {str(e)}")
 
         # Kiểm tra kích thước trang
         page_size = self.get_page_size(page)
